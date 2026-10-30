@@ -1,0 +1,27 @@
+@let os = os$ | async;
+
+<div class="input-group">
+  <input
+    type="text"
+    class="form-control"
+    id="{{ filterName() }}-filter"
+    [placeholder]="
+      'Filter ' +
+      (focusableInput()
+        ? '(' + (os === 'darwin' ? 'Cmd' : 'Ctrl') + '+Shift+F)'
+        : '')
+    "
+    [formControl]="filter"
+    [appFocusOnEvent]="focusableInput()"
+  />
+  @if (filter.value.length > 0) {
+    <button
+      type="button"
+      (click)="clearFilter()"
+      class="btn btn-custom"
+      ngbTooltip="Clear filter"
+    >
+      <app-svg icon="clear" />
+    </button>
+  }
+</div>

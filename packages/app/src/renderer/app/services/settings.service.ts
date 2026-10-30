@@ -1,0 +1,301 @@
+import { Service, inject } from '@angular/core';
+import {
+  Environment,
+  IsEqual,
+  ReorderAction,
+  moveItemAtTarget
+} from '@mockoon/commons';
+import { Observable, combineLatest } from 'rxjs';
+import {
+  debounceTime,
+  distinctUntilChanged,
+  filter,
+  first,
+  map,
+  mergeMap,
+  pairwise,
+  startWith,
+  tap
+} from 'rxjs/operators';
+import { gt as semverGt } from 'semver';
+import { SettingsSchema } from 'src/renderer/app/constants/settings-schema.constants';
+import { MainApiService } from 'src/renderer/app/services/main-api.service';
+import { StorageService } from 'src/renderer/app/services/storage.service';
+import { UIService } from 'src/renderer/app/services/ui.service';
+import { updateSettingsAction } from 'src/renderer/app/stores/actions';
+import { Store } from 'src/renderer/app/stores/store';
+import { Config, getCallbackApiUrl } from 'src/renderer/config';
+import {
+  EnvironmentsCategories,
+  FileWatcherOptions,
+  Settings
+} from 'src/shared/models/settings.model';
+
+@Service()
+export class SettingsService {
+  private store = inject(Store);
+  private storageService = inject(StorageService);
+  private uiService = inject(UIService);
+  private mainApiService = inject(MainApiService);
+
+  /**
+   * Monitor some settings to trigger behaviors in the main process.
+   * Store will emit null first, then the saved settings.
+   */
+  public monitorSettings() {
+    // switch Faker locale
+    return this.store.select('settings').pipe(
+      pairwise(),
+      tap(([previousSettings, currentSettings]) => {
+        if (
+          (!previousSettings && currentSettings) ||
+          (previousSettings.fileWatcherEnabled !==
+            currentSettings.fileWatcherEnabled &&
+            currentSettings.fileWatcherEnabled === FileWatcherOptions.DISABLED)
+        ) {
+          this.mainApiService.invoke('APP_UNWATCH_ALL_FILE');
+        }
+      })
+    );
+  }
+
+  /**
+   * Get existing settings from storage or create default one.
+   * Start saving after loading the data.
+   *
+   * @returns
+   */
+  public loadSettings(): Observable<any> {
+    return this.storageService.loadSettings().pipe(
+      tap((settings: Settings) => {
+        const callbackApiUrl = getCallbackApiUrl();
+        const validatedSchema = SettingsSchema.validate({
+          ...settings,
+          apiUrl: settings?.apiUrl?.trim() || callbackApiUrl
+        });
+        this.updateSettings(validatedSchema.value);
+        settings = validatedSchema.value;
+
+        if (semverGt(Config.appVersion, settings.lastChangelog)) {
+          this.uiService.openModal('changelog');
+
+          this.updateSettings({ lastChangelog: Config.appVersion });
+        }
+
+        if (
+          !settings.welcomeShown &&
+          (!Config.isWeb || (Config.isWeb && !settings.apiUrl))
+        ) {
+          this.uiService.openModal('welcome');
+        }
+      })
+    );
+  }
+
+  /**
+   * Subscribe to initiate saving settings changes
+   * Propagate the disabled routes to the server if they are updated (desktop local envs only)
+   *
+   * @returns
+   */
+  public saveSettings(): Observable<void> {
+    return this.store.select('settings').pipe(
+      filter((settings): settings is Settings => !!settings),
+      debounceTime(500),
+      distinctUntilChanged(IsEqual<Settings>),
+      startWith<Settings | null>(null),
+      pairwise(),
+      tap(([previousSettings, currentSettings]) => {
+        if (
+          !Config.isWeb &&
+          previousSettings &&
+          currentSettings.disabledRoutes !== previousSettings.disabledRoutes
+        ) {
+          this.mainApiService.send(
+            'APP_UPDATE_DISABLED_ROUTES',
+            currentSettings.disabledRoutes
+          );
+        }
+
+        this.storageService.initiateSaving();
+      }),
+      mergeMap(([_previousSettings, currentSettings]) =>
+        this.storageService.saveSettings(
+          currentSettings,
+          currentSettings.storagePrettyPrint
+        )
+      )
+    );
+  }
+
+  /**
+   * Get the current settings
+   *
+   * @returns
+   */
+  public getSettings() {
+    return this.store.get('settings');
+  }
+
+  /**
+   * Update the settings with new properties
+   *
+   * @param newProperties
+   */
+  public updateSettings(newProperties: Partial<Settings>) {
+    this.store.update(updateSettingsAction(newProperties));
+  }
+
+  /**
+   * Get the API URL with settings override priority for desktop app.
+   * Fallback to the shared config value.
+   */
+  public selectApiUrl(): Observable<string> {
+    return this.selectApiUrlChanges().pipe(first());
+  }
+
+  public selectApiUrlChanges(): Observable<string> {
+    return this.store.select('settings').pipe(
+      filter((settings) => !!settings),
+      map((settings) => settings.apiUrl?.trim()),
+      map(
+        (configuredApiUrl) =>
+          this.normalizeApiUrl(configuredApiUrl) ?? Config.defaultApiUrl
+      ),
+      distinctUntilChanged()
+    );
+  }
+
+  private normalizeApiUrl(apiUrl?: string | null) {
+    if (!apiUrl) {
+      return null;
+    }
+
+    try {
+      const normalizedApiUrl = new URL(
+        /^https?:\/\//i.test(apiUrl) ? apiUrl : `https://${apiUrl}`
+      );
+
+      if (
+        normalizedApiUrl.protocol === 'http:' &&
+        !(
+          normalizedApiUrl.hostname === 'localhost' ||
+          normalizedApiUrl.hostname.endsWith('.localhost') ||
+          ['127.0.0.1', '[::1]'].includes(normalizedApiUrl.hostname)
+        )
+      ) {
+        return null;
+      }
+
+      normalizedApiUrl.pathname = normalizedApiUrl.pathname.replace(
+        /\/?$/,
+        '/'
+      );
+
+      return normalizedApiUrl.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Check if a custom API URL override is configured in settings.
+   */
+  public selectIsSelfHosted(): Observable<boolean> {
+    return this.selectApiUrlChanges().pipe(
+      map((apiUrl) => apiUrl !== Config.defaultApiUrl)
+    );
+  }
+
+  /**
+   * Check if a custom API URL override is configured in settings.
+   */
+  public getIsSelfHosted(): boolean {
+    const apiUrl = this.store.get('settings').apiUrl?.trim();
+
+    return (
+      (this.normalizeApiUrl(apiUrl) ?? Config.defaultApiUrl) !==
+      Config.defaultApiUrl
+    );
+  }
+
+  public canCreateCloudEnvironment(): boolean {
+    return !this.getIsSelfHosted() || this.store.get('workspaces').length > 0;
+  }
+
+  public selectCanCreateCloudEnvironment(): Observable<boolean> {
+    return combineLatest([
+      this.selectIsSelfHosted(),
+      this.store.select('workspaces')
+    ]).pipe(
+      map(
+        ([isSelfHosted, workspaces]) => !isSelfHosted || workspaces.length > 0
+      ),
+      distinctUntilChanged()
+    );
+  }
+
+  /**
+   * Remove disabled routes from settings when they are not existing anymore
+   *
+   * @param environment
+   */
+  public cleanDisabledRoutes(environment: Environment) {
+    const environmentUuid = environment.uuid;
+    const routesUuids = environment.routes.map((route) => route.uuid);
+    const disabledRoutes = { ...this.store.get('settings').disabledRoutes };
+
+    if (disabledRoutes[environmentUuid]) {
+      const newDisabledRoutes = disabledRoutes[environmentUuid].filter(
+        (routeUuid) => routesUuids.includes(routeUuid)
+      );
+
+      if (disabledRoutes[environmentUuid].length !== newDisabledRoutes.length) {
+        disabledRoutes[environmentUuid] = newDisabledRoutes;
+        this.updateSettings({ disabledRoutes });
+      }
+    }
+  }
+
+  /**
+   * Remove collapsed folders from settings when they are not existing anymore
+   *
+   * @param environment
+   */
+  public cleanCollapsedFolders(environment: Environment) {
+    const environmentUuid = environment.uuid;
+    const foldersUuids = environment.folders.map((folder) => folder.uuid);
+    const collapsedFolders = { ...this.store.get('settings').collapsedFolders };
+
+    if (collapsedFolders[environmentUuid]) {
+      const newCollapsedFolders = collapsedFolders[environmentUuid].filter(
+        (folderUuid) => foldersUuids.includes(folderUuid)
+      );
+
+      if (
+        collapsedFolders[environmentUuid].length !== newCollapsedFolders.length
+      ) {
+        collapsedFolders[environmentUuid] = newCollapsedFolders;
+        this.updateSettings({ collapsedFolders });
+      }
+    }
+  }
+
+  /**
+   * Reorganize environments categories
+   *
+   * @param reorderAction
+   */
+  public reorganizeEnvironmentsCategories(
+    reorderAction: ReorderAction<string>
+  ) {
+    this.updateSettings({
+      environmentsCategoriesOrder: moveItemAtTarget<EnvironmentsCategories>(
+        this.store.get('settings').environmentsCategoriesOrder,
+        reorderAction.reorderActionType,
+        reorderAction.sourceId as string,
+        reorderAction.targetId as string
+      )
+    });
+  }
+}

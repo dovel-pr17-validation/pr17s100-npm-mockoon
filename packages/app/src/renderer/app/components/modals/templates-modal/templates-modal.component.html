@@ -1,0 +1,389 @@
+@let user = user$ | async;
+@let templates = templates$ | async;
+@let activeTemplate = activeTemplate$ | async;
+@let activeTemplatesTab = activeTemplatesTab$ | async;
+@let activeTemplateListItem = activeTemplateListItem$ | async;
+@let generatingTemplate = generatingTemplate$ | async;
+@let generatingEndpoint = generatingEndpoint$ | async;
+@let lastGeneratedEndpoint = lastGeneratedEndpoint$ | async;
+@let demoEndpoint = demoEndpoint$ | async;
+@let isDemoLoading = isDemoLoading$ | async;
+
+@let isFree = !user || user.plan === 'FREE';
+@let isPaid = user && user.plan !== 'FREE';
+@let canGenerateTemplate =
+  promptTemplate.value &&
+  (generatingTemplate === 'NONE' || generatingTemplate === 'DONE') &&
+  user?.templatesQuotaUsed < user?.templatesQuota;
+@let canGenerateEndpoint =
+  promptEndpoint.value &&
+  (generatingEndpoint === 'NONE' || generatingEndpoint === 'DONE') &&
+  user?.templatesQuotaUsed < user?.templatesQuota;
+
+<div class="modal-header border-0 pb-0">
+  <ul class="nav nav-tabs">
+    <li class="nav-item">
+      <a
+        class="nav-link"
+        [class]="{ active: activeTemplatesTab === 'LIST' }"
+        (click)="setActiveTab('LIST')"
+      >
+        JSON Templates
+      </a>
+    </li>
+    <li class="nav-item">
+      <a
+        class="nav-link"
+        [class]="{
+          active: activeTemplatesTab === 'GENERATE_TEMPLATE'
+        }"
+        (click)="setActiveTab('GENERATE_TEMPLATE')"
+      >
+        <app-svg icon="magic" class="me-2 text-warning" />
+        <!-- Display specific title for demo -->
+        {{ isFree ? 'AI assistants' : 'Generate JSON templates' }}
+      </a>
+    </li>
+    @if (isPaid) {
+      <li class="nav-item">
+        <a
+          class="nav-link"
+          [class]="{
+            active: activeTemplatesTab === 'GENERATE_ENDPOINT'
+          }"
+          (click)="setActiveTab('GENERATE_ENDPOINT')"
+        >
+          <app-svg icon="magic" class="me-2 text-warning" />
+          Generate HTTP endpoints
+        </a>
+      </li>
+    }
+  </ul>
+</div>
+<div class="modal-body">
+  <!-- List tab -->
+  @if (activeTemplatesTab === 'LIST') {
+    <div class="h-100" [class]="{ 'd-flex': templates }">
+      @if (templates) {
+        <div class="col-4 me-2 h-100 d-flex flex-column">
+          <div class="mb-2">
+            <app-filter
+              filterName="templates"
+              [focusableInput]="focusableInputs.TEMPLATES_FILTER"
+            />
+          </div>
+          <div class="list-group list-group-flush h-100 overflow-auto">
+            @for (template of templates; track template.id) {
+              <button
+                class="list-group-item list-group-item-action"
+                [class]="{
+                  active: template.id === activeTemplateListItem?.id
+                }"
+                type="button"
+                (click)="setActiveTemplateListItem(template)"
+              >
+                <div class="text-truncate">
+                  {{ template.name }}
+                </div>
+              </button>
+            }
+          </div>
+        </div>
+        <div class="col ps-4 d-flex flex-column h-100">
+          <app-editor
+            [readOnly]="true"
+            [text]="activeTemplate?.content"
+            [options]="defaultEditorOptions.options"
+            [mode]="activeTemplate?.type"
+            uuid="templatePreview"
+          />
+          @if (activeTemplate?.source) {
+            <p class="px-2 pt-2 mb-0 text-muted">
+              Source:
+              <a href="{{ activeTemplate?.source }}" target="_blank">{{
+                activeTemplate?.source
+              }}</a>
+            </p>
+          }
+        </div>
+      } @else {
+        <p class="message">Templates could not be loaded</p>
+      }
+    </div>
+  }
+  <!-- Generate tab when user is connected and paid -->
+  @if (activeTemplatesTab === 'GENERATE_TEMPLATE' && isPaid) {
+    <div class="d-flex flex-column h-100">
+      <div class="input-group mb-2">
+        <input
+          type="text"
+          class="form-control"
+          [maxlength]="maxPromptLength"
+          [formControl]="promptTemplate"
+          placeholder='Prompt, e.g. "invoices", "customers", "bird species" etc.'
+          (keydown.enter)="canGenerateTemplate && generateTemplate()"
+        />
+        <ng-container [ngTemplateOutlet]="templatingCheckbox" />
+        <button
+          id="templates-generate-button"
+          type="button"
+          class="btn btn-secondary"
+          (click)="generateTemplate()"
+          [disabled]="!canGenerateTemplate"
+        >
+          Generate
+        </button>
+        @if (generatingTemplate === 'INPROGRESS') {
+          <div class="input-group-text">
+            <app-spinner />
+          </div>
+        }
+      </div>
+      <app-editor
+        [formControl]="generatedTemplateBody"
+        [options]="defaultEditorOptions.options"
+        [mode]="defaultEditorOptions.mode"
+        uuid="templateGenPreview"
+      />
+      <p class="px-2 pt-2 mb-0 text-muted fst-italic">
+        Note: Depending on its length, template generation may take time. You
+        can safely close this modal and return later to view the result.
+      </p>
+    </div>
+  }
+  <!-- Generate endpoint tab when user is connected and paid -->
+  @if (activeTemplatesTab === 'GENERATE_ENDPOINT' && isPaid) {
+    <div class="d-flex flex-column h-100">
+      <div class="input-group mb-2">
+        <input
+          type="text"
+          class="form-control"
+          [maxlength]="maxPromptLength"
+          [formControl]="promptEndpoint"
+          placeholder='Prompt, e.g. "add a new invoice", "delete a contact", "get all movies", etc.'
+          (keydown.enter)="canGenerateEndpoint && generateEndpoint()"
+        />
+        <ng-container [ngTemplateOutlet]="templatingCheckbox" />
+        <button
+          id="templates-endpoint-generate-button"
+          type="button"
+          class="btn btn-secondary"
+          (click)="generateEndpoint()"
+          [disabled]="!canGenerateEndpoint"
+        >
+          Generate
+        </button>
+        @if (generatingEndpoint === 'INPROGRESS') {
+          <div class="input-group-text">
+            <app-spinner />
+          </div>
+        }
+      </div>
+      <fieldset class="flex-fill d-flex flex-column">
+        <legend>Endpoint preview</legend>
+        <div [class]="{ 'opacity-25': !lastGeneratedEndpoint }">
+          <div class="d-flex align-items-center mb-2">
+            <span
+              class="color-method-{{
+                !lastGeneratedEndpoint?.method
+                  ? 'all'
+                  : lastGeneratedEndpoint?.method
+              }} me-2"
+              >{{
+                !lastGeneratedEndpoint?.method
+                  ? 'method'
+                  : (lastGeneratedEndpoint?.method | uppercase)
+              }}
+            </span>
+            <span
+              >/{{
+                !lastGeneratedEndpoint?.endpoint
+                  ? 'path'
+                  : lastGeneratedEndpoint?.endpoint
+              }}</span
+            >
+          </div>
+          <div class="mb-2">
+            <span class="fst-italic">Description:</span>
+            {{ lastGeneratedEndpoint?.documentation }}
+          </div>
+          <div class="mb-2 fst-italic">Response body:</div>
+        </div>
+        <app-editor
+          [class]="{ 'opacity-25': !lastGeneratedEndpoint }"
+          [options]="defaultEditorOptions.options"
+          [mode]="defaultEditorOptions.mode"
+          uuid="endpointGenPreview"
+          [value]="lastGeneratedEndpoint?.responses[0]?.body"
+        />
+      </fieldset>
+      <p class="px-2 pt-2 mb-0 text-muted fst-italic">
+        Note: Depending on its length, endpoint generation may take time. You
+        can safely close this modal and return later to view the result.
+      </p>
+    </div>
+  }
+  <!-- Demo generate tab when no user or FREE plan -->
+  @if (activeTemplatesTab === 'GENERATE_TEMPLATE' && isFree) {
+    <div class="d-flex h-100 no-interact justify-content-center">
+      <div class="d-flex flex-column h-100 animation-fade-in">
+        <div class="d-flex flex-column h-100 p-4 rounded bg-dark">
+          <div class="d-flex align-items-center mb-4">
+            <div class="input-group shadow border-radius">
+              <input
+                type="text"
+                class="form-control"
+                [formControl]="demoPrompt"
+                tabindex="-1"
+              />
+              <button
+                id="demoGenerateButton"
+                type="button"
+                class="btn btn-secondary"
+                tabindex="-1"
+              >
+                Generate
+              </button>
+            </div>
+            @if (isDemoLoading) {
+              <div class="input-group-text">
+                <app-spinner />
+              </div>
+            }
+          </div>
+          <fieldset class="flex-fill d-flex flex-column">
+            <legend>Endpoint preview</legend>
+            <div [class]="{ 'opacity-25': !demoEndpoint }">
+              <div class="d-flex align-items-center mb-2">
+                <span
+                  class="color-method-{{
+                    !demoEndpoint?.method ? 'all' : demoEndpoint?.method
+                  }} me-2"
+                  >{{
+                    !demoEndpoint?.method
+                      ? 'method'
+                      : (demoEndpoint?.method | uppercase)
+                  }}
+                </span>
+                <span
+                  >/{{
+                    !demoEndpoint?.endpoint ? 'path' : demoEndpoint?.endpoint
+                  }}</span
+                >
+              </div>
+              <div class="mb-2">
+                <span class="fst-italic">Description:</span>
+                {{ demoEndpoint?.documentation }}
+              </div>
+              <div class="mb-2 fst-italic">Response body:</div>
+            </div>
+            <app-editor
+              [class]="{ 'opacity-25': !demoEndpoint }"
+              class="shadow"
+              [readOnly]="true"
+              [hideCursor]="true"
+              tabindex="-1"
+              [value]="demoEndpoint?.body"
+              [options]="defaultEditorOptions.options"
+              [mode]="defaultEditorOptions.mode"
+              uuid="demoTemplateGenPreview"
+            />
+          </fieldset>
+        </div>
+        <div class="mt-auto">
+          <h4 class="text-center my-4 text-shadow w-75 mx-auto">
+            Generate your own templates and endpoints using our AI assistants
+            and prototype faster than ever
+          </h4>
+        </div>
+      </div>
+    </div>
+  }
+</div>
+<div class="modal-footer justify-content-space-between">
+  @if (
+    isPaid &&
+    (activeTemplatesTab === 'GENERATE_TEMPLATE' ||
+      activeTemplatesTab === 'GENERATE_ENDPOINT')
+  ) {
+    <div class="col-6 d-flex align-items-center">
+      <p
+        class="mb-0"
+        [class]="{
+          'text-warning': user?.templatesQuotaUsed >= user?.templatesQuota
+        }"
+      >
+        Quota used ({{ user?.templatesQuotaUsed }}/{{ user?.templatesQuota }})
+      </p>
+    </div>
+  }
+  <div class="ms-auto">
+    <button
+      type="button"
+      class="btn btn-secondary modal-close"
+      (click)="close()"
+    >
+      Close
+    </button>
+    <!-- Display creation CTA only for templates or if paid user on generate tab -->
+    @if (
+      activeTemplatesTab === 'LIST' ||
+      (activeTemplatesTab === 'GENERATE_TEMPLATE' && isPaid)
+    ) {
+      @if (templates) {
+        <button
+          type="button"
+          class="btn btn-primary ms-2"
+          (click)="createCRUDRoute(activeTemplatesTab, activeTemplate)"
+          ngbTooltip="Automatically creates a CRUD route and a data bucket from the template"
+        >
+          <app-svg icon="endpoints" class="me-1" />Create CRUD
+        </button>
+      }
+      @if (templates) {
+        <button
+          type="button"
+          class="btn btn-primary ms-2"
+          (click)="createGetRoute(activeTemplatesTab, activeTemplate)"
+          ngbTooltip="Automatically creates an HTTP GET route with the chosen template as the response body"
+        >
+          <app-svg icon="endpoint" class="me-1" />Create GET route
+        </button>
+      }
+    }
+    <!-- Display creation CTA for endpoint generation -->
+    @if (activeTemplatesTab === 'GENERATE_ENDPOINT' && isPaid) {
+      <button
+        type="button"
+        class="btn btn-primary ms-2"
+        (click)="createEndpoint()"
+        ngbTooltip="Automatically creates an HTTP route with the generated data"
+        [disabled]="!lastGeneratedEndpoint"
+      >
+        <app-svg icon="endpoint" class="me-1" />Create HTTP route
+      </button>
+    }
+    @if (
+      isFree &&
+      (activeTemplatesTab === 'GENERATE_TEMPLATE' ||
+        activeTemplatesTab === 'GENERATE_ENDPOINT')
+    ) {
+      <a class="btn btn-warning ms-2" href="{{ proPlansURL }}" target="_blank">
+        Discover our Pro plans
+      </a>
+    }
+  </div>
+</div>
+
+<ng-template #templatingCheckbox>
+  <app-checkbox
+    id="templates-generate-option"
+    class="mx-2"
+    [formControl]="templatingToggle"
+    prefix="templatingToggle"
+    [item]="{
+      icon: 'data',
+      tooltip: 'Use templating helpers (e.g. {{ faker person.firstname}} )'
+    }"
+  />
+</ng-template>

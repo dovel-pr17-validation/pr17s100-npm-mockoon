@@ -1,0 +1,184 @@
+@let isActiveEnvironmentEditable = isActiveEnvironmentEditable$ | async;
+@let routeResponse = routeResponse$ | async;
+@let activeRoute = activeRoute$ | async;
+@let deleteRuleRequested = deleteRuleRequested$ | async;
+
+@if (routeResponse) {
+  <ng-container [formGroup]="form">
+    <div class="rules d-flex">
+      @if (form.get('rules').value.length > 1) {
+        <div class="rules-operator d-flex flex-column justify-content-center">
+          <app-radio
+            prefix="rules-operators"
+            formControlName="rulesOperator"
+            [items]="rulesOperators"
+            [nullable]="false"
+          />
+        </div>
+        <div class="brackets"></div>
+      }
+      <div class="rules-list flex-grow-1">
+        @if (activeRoute) {
+          <ng-container formArrayName="rules">
+            @for (
+              rule of form.get('rules')['controls'];
+              track ruleTrackBy.id(rule);
+              let ruleIndex = $index
+            ) {
+              <div
+                class="rule-item"
+                [class]="{
+                  'pt-1': ruleIndex !== 0,
+                  'pb-1': ruleIndex !== form.get('rules')['controls'].length - 1
+                }"
+                [formGroupName]="ruleIndex"
+                appDraggable
+                appDropzone
+                dragContainer="route-rules"
+                [dragEnabled]="
+                  isActiveEnvironmentEditable &&
+                  form.get('rules')['controls'].length > 1
+                "
+                dragParentId="root"
+                [dragIsContainer]="false"
+                [dragId]="ruleIndex"
+                (dropped)="reorderRules($event)"
+              >
+                <app-select
+                  class="overflow-hidden me-2"
+                  formControlName="target"
+                  [enableCustomInput]="false"
+                  [hasCategory]="true"
+                  [items]="responseRuleTargets"
+                  [dropdownId]="'rules' + ruleIndex + 'target'"
+                />
+                <div class="me-2">
+                  <!-- the modifier is disabled for request number, method and path as there is nothing to "explore" (number/string values) -->
+                  <input
+                    type="text"
+                    class="form-control"
+                    [placeholder]="
+                      modifierPlaceholders[
+                        form.get(['rules', ruleIndex, 'target']).value
+                      ] || ''
+                    "
+                    formControlName="modifier"
+                    [attr.disabled]="
+                      form.get(['rules', ruleIndex, 'target']).value ===
+                        'request_number' ||
+                      form.get(['rules', ruleIndex, 'target']).value ===
+                        'path' ||
+                      form.get(['rules', ruleIndex, 'target']).value ===
+                        'method'
+                        ? true
+                        : null
+                    "
+                    [ngbTypeahead]="
+                      headerNamesSearch(
+                        form.get(['rules', ruleIndex, 'target']).value
+                      )
+                    "
+                  />
+                </div>
+                <app-checkbox
+                  class="me-2"
+                  formControlName="invert"
+                  [prefix]="'rule' + ruleIndex + 'invert'"
+                  [item]="rulesInvert"
+                />
+                <app-select
+                  class="me-2"
+                  formControlName="operator"
+                  [enableCustomInput]="false"
+                  [items]="responseRuleOperators"
+                  [dropdownId]="'rules' + ruleIndex + 'operator'"
+                  [disabledList]="
+                    disabledOperatorsPerTarget[
+                      form.get(['rules', ruleIndex, 'target']).value
+                    ]
+                  "
+                />
+                <input
+                  type="text"
+                  class="form-control"
+                  [placeholder]="
+                    valuePlaceholders[
+                      form.get(['rules', ruleIndex, 'operator']).value
+                    ] || ''
+                  "
+                  formControlName="value"
+                  [attr.disabled]="
+                    form.get(['rules', ruleIndex, 'operator']).value ===
+                      'null' ||
+                    form.get(['rules', ruleIndex, 'operator']).value ===
+                      'empty_array'
+                      ? true
+                      : null
+                  "
+                  [ngbTypeahead]="
+                    headerValuesSearch(
+                      form.get(['rules', ruleIndex, 'target']).value
+                    )
+                  "
+                />
+                @if (deleteRuleRequested) {
+                  <button
+                    type="button"
+                    class="btn btn-link btn-icon delete-rule"
+                    [class]="{
+                      'text-danger':
+                        deleteRuleRequested.enabled === true &&
+                        deleteRuleRequested.payload === ruleIndex
+                    }"
+                    [ngbTooltip]="
+                      deleteRuleRequested.enabled === true &&
+                      deleteRuleRequested.payload === ruleIndex
+                        ? 'Confirm'
+                        : 'Delete'
+                    "
+                    (click)="removeRule(ruleIndex)"
+                    [disabled]="!isActiveEnvironmentEditable"
+                  >
+                    <app-svg icon="delete" />
+                  </button>
+                }
+                @if (form.get('rules').value.length > 1) {
+                  <button
+                    #dragHandle
+                    ngbTooltip="Reorder"
+                    type="button"
+                    class="btn btn-link btn-icon cursor-grab text-muted"
+                    [disabled]="!isActiveEnvironmentEditable"
+                  >
+                    <app-svg icon="drag_indicator" />
+                  </button>
+                }
+              </div>
+            }
+          </ng-container>
+        }
+      </div>
+    </div>
+    <div class="d-flex align-items-center mt-2">
+      <button
+        type="button"
+        class="btn btn-link btn-icon add-rule"
+        (click)="addRule()"
+        [disabled]="!isActiveEnvironmentEditable"
+      >
+        <app-svg icon="add_box" class="text-success pe-2" />
+        Add rule
+      </button>
+      @if (activeRoute) {
+        @if (rulesDisablingResponseModes.includes(activeRoute.responseMode)) {
+          <div
+            class="warning-message ms-auto text-center pe-2"
+            id="disabled-rules-warning-message"
+          >
+            {{ texts.DISABLED_RULES_WARNING }}
+          </div>
+        }
+      }
+    </div>
+  </ng-container>
+}

@@ -1,0 +1,186 @@
+import { AsyncPipe } from '@angular/common';
+import { Component, EventEmitter, inject, Output } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {
+  AbstractControl,
+  FormArray,
+  FormBuilder,
+  FormGroup,
+  FormsModule,
+  ReactiveFormsModule
+} from '@angular/forms';
+import {
+  BuildResponseCallback,
+  Callback,
+  CallbackInvocation,
+  Environment,
+  RouteResponse
+} from '@mockoon/commons';
+import { NgbTooltip } from '@ng-bootstrap/ng-bootstrap';
+import { Observable } from 'rxjs';
+import { filter, map, tap } from 'rxjs/operators';
+import { StableTrackBy } from 'src/renderer/app/classes/stable-track-by';
+import { TimedBoolean } from 'src/renderer/app/classes/timed-boolean';
+import { SvgComponent } from 'src/renderer/app/components/svg/svg.component';
+import { Texts } from 'src/renderer/app/constants/texts.constant';
+import { InputNumberDirective } from 'src/renderer/app/directives/input-number.directive';
+import { DropdownItems } from 'src/renderer/app/models/common.model';
+import { EnvironmentsService } from 'src/renderer/app/services/environments.service';
+import { Store } from 'src/renderer/app/stores/store';
+import { SelectComponent } from '../custom-form-elements/select.component';
+
+@Component({
+  selector: 'app-route-callbacks',
+  templateUrl: 'route-callbacks.component.html',
+  styleUrls: ['./route-callbacks.component.scss'],
+  imports: [
+    FormsModule,
+    ReactiveFormsModule,
+    NgbTooltip,
+    SvgComponent,
+    InputNumberDirective,
+    AsyncPipe,
+    SelectComponent
+  ]
+})
+export class RouteCallbacksComponent {
+  private environmentsService = inject(EnvironmentsService);
+  private store = inject(Store);
+  private formBuilder = inject(FormBuilder);
+  public callbackTrackBy = new StableTrackBy<AbstractControl>();
+  public activeRouteResponse$ = this.store.selectActiveRouteResponse();
+  public activeRoute$ = this.store.selectActiveRoute();
+  @Output()
+  public callbackAdded = new EventEmitter<void>();
+  public activeEnvironment$: Observable<Environment>;
+  public routeResponse$: Observable<RouteResponse>;
+  public form: FormGroup;
+  public deleteCallbackRequested$ = new TimedBoolean();
+  public texts = Texts;
+  public callbacks$: Observable<DropdownItems>;
+  public Infinity = Infinity;
+  public allCallbacks$: Observable<Callback[]>;
+  private listenToChanges = true;
+  public isActiveEnvironmentEditable$ = this.store
+    .selectIsActiveEnvironmentEditable()
+    .pipe(
+      tap((isEditable) => {
+        if (isEditable) {
+          this.form.enable({ emitEvent: false });
+        } else {
+          this.form.disable({ emitEvent: false });
+        }
+      })
+    );
+
+  public get callbacks() {
+    return this.form.get('callbacks') as FormArray;
+  }
+
+  constructor() {
+    this.activeEnvironment$ = this.store.selectActiveEnvironment();
+    this.form = this.formBuilder.group({
+      callbacks: this.formBuilder.array([])
+    });
+
+    // subscribe to active route response to reset the form
+    this.routeResponse$ = this.activeRouteResponse$.pipe(
+      filter((activeRouteResponse) => !!activeRouteResponse),
+      this.store.distinctUUIDOrForce(),
+      tap((routeResponse) => {
+        this.replaceCallbacks(routeResponse.callbacks, false);
+      })
+    );
+
+    this.allCallbacks$ = this.activeEnvironment$.pipe(
+      filter((activeEnvironment) => !!activeEnvironment),
+      map((activeEnvironment) => activeEnvironment.callbacks)
+    );
+
+    // read defined callbacks in the active environment.
+    this.callbacks$ = this.activeEnvironment$.pipe(
+      filter((activeEnvironment) => !!activeEnvironment),
+      map((activeEnvironment) =>
+        activeEnvironment.callbacks.map((cb) => ({
+          value: cb.uuid,
+          label: `${cb.name}${cb.documentation ? ' - ' + cb.documentation : ''}`
+        }))
+      )
+    );
+
+    // subscribe to changes and send new values to the store
+    this.form.valueChanges
+      .pipe(
+        filter(() => this.listenToChanges),
+        tap((newProperties) => {
+          this.environmentsService.updateActiveRouteResponse(newProperties);
+        }),
+        takeUntilDestroyed()
+      )
+      .subscribe();
+  }
+
+  /**
+   * Add a new callback to the list if possible
+   */
+  public addCallback(callbacks: Callback[]) {
+    if (callbacks.length > 0) {
+      this.callbacks.push(
+        this.formBuilder.group(BuildResponseCallback(callbacks[0].uuid))
+      );
+    } else {
+      this.callbacks.push(this.formBuilder.group(BuildResponseCallback()));
+    }
+
+    this.callbackAdded.emit();
+  }
+
+  /**
+   * Navigate to the definition of provided callback.
+   *
+   * @param callbackUUID callback uuid
+   */
+  public goToCallbackDefinition(callbackUUID: string) {
+    this.environmentsService.navigateToCallbackDefinition(callbackUUID);
+  }
+
+  /**
+   * Remove a callback from the list
+   */
+  public removeCallback(callbackIndex: number) {
+    const confirmValue = this.deleteCallbackRequested$.readValue(callbackIndex);
+
+    if (confirmValue.enabled && callbackIndex === confirmValue.payload) {
+      this.callbacks.removeAt(callbackIndex);
+    }
+  }
+
+  /**
+   * Replace all callbacks in the FormArray
+   */
+  private replaceCallbacks(
+    newCallbacks: CallbackInvocation[],
+    listenToChanges = true
+  ) {
+    this.listenToChanges = listenToChanges;
+
+    // Preserve the current disabled state of the form
+    const isFormDisabled = this.form.disabled;
+    this.callbacks.clear();
+
+    newCallbacks.forEach((cb) => {
+      this.callbacks.push(
+        this.formBuilder.group({
+          ...cb
+        } as CallbackInvocation)
+      );
+    });
+
+    // Reapply the disabled state if necessary
+    if (isFormDisabled) {
+      this.form.disable({ emitEvent: false });
+    }
+
+    this.listenToChanges = true;
+  }
+}

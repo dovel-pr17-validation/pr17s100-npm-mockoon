@@ -1,0 +1,333 @@
+import { AsyncPipe } from '@angular/common';
+import { Component, EventEmitter, Output, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {
+  AbstractControl,
+  FormsModule,
+  ReactiveFormsModule,
+  UntypedFormArray,
+  UntypedFormBuilder,
+  UntypedFormGroup
+} from '@angular/forms';
+import {
+  BuildResponseRule,
+  ReorderAction,
+  ResponseRule,
+  ResponseRuleOperators,
+  ResponseRuleTargets,
+  RouteResponse,
+  RulesDisablingResponseModes
+} from '@mockoon/commons';
+import { NgbTooltip, NgbTypeahead } from '@ng-bootstrap/ng-bootstrap';
+import { Observable } from 'rxjs';
+import {
+  debounceTime,
+  distinctUntilChanged,
+  filter,
+  map,
+  tap
+} from 'rxjs/operators';
+import { StableTrackBy } from 'src/renderer/app/classes/stable-track-by';
+import { TimedBoolean } from 'src/renderer/app/classes/timed-boolean';
+import { CheckboxComponent } from 'src/renderer/app/components/custom-form-elements/checkbox.component';
+import { SvgComponent } from 'src/renderer/app/components/svg/svg.component';
+import {
+  headerNames,
+  headerValues
+} from 'src/renderer/app/constants/routes.constants';
+import { Texts } from 'src/renderer/app/constants/texts.constant';
+import { DraggableDirective } from 'src/renderer/app/directives/draggable.directive';
+import { DropzoneDirective } from 'src/renderer/app/directives/dropzone.directive';
+import {
+  CheckboxItem,
+  DropdownItems,
+  RadioItems
+} from 'src/renderer/app/models/common.model';
+import { EnvironmentsService } from 'src/renderer/app/services/environments.service';
+import { moveItemToTargetIndex } from 'src/renderer/app/stores/reducer-utils';
+import { Store } from 'src/renderer/app/stores/store';
+import { RadioComponent } from '../custom-form-elements/radio.component';
+import { SelectComponent } from '../custom-form-elements/select.component';
+
+@Component({
+  selector: 'app-route-response-rules',
+  templateUrl: 'route-response-rules.component.html',
+  styleUrls: ['./route-response-rules.component.scss'],
+  imports: [
+    FormsModule,
+    ReactiveFormsModule,
+    DraggableDirective,
+    DropzoneDirective,
+    NgbTypeahead,
+    NgbTooltip,
+    SvgComponent,
+    AsyncPipe,
+    CheckboxComponent,
+    RadioComponent,
+    SelectComponent
+  ]
+})
+export class RouteResponseRulesComponent {
+  private environmentsService = inject(EnvironmentsService);
+  private formBuilder = inject(UntypedFormBuilder);
+  private store = inject(Store);
+  public ruleTrackBy = new StableTrackBy<AbstractControl>();
+  public activeRouteResponse$ = this.store.selectActiveRouteResponse();
+  public activeRoute$ = this.store.selectActiveRoute();
+  @Output()
+  public ruleAdded = new EventEmitter<void>();
+  public routeResponse$: Observable<RouteResponse>;
+  public form: UntypedFormGroup;
+  public readonly rulesDisablingResponseModes = RulesDisablingResponseModes;
+  public responseRuleTargets: DropdownItems<ResponseRuleTargets> = [
+    { label: 'Request', category: true },
+    { value: 'body', label: 'Body' },
+    { value: 'query', label: 'Query parameter' },
+    { value: 'header', label: 'Header' },
+    { value: 'cookie', label: 'Cookie' },
+    { value: 'params', label: 'Route parameter' },
+    { value: 'path', label: 'Path (starts with /)' },
+    { value: 'method', label: 'Method (lower case: get, post, ...)' },
+    { value: 'request_number', label: 'Number (starting at 1)' },
+    { label: 'Stateful sources', category: true },
+    { value: 'global_var', label: 'Global variable' },
+    { value: 'data_bucket', label: 'Data bucket' },
+    { label: 'Misc', category: true },
+    { value: 'templating', label: 'Custom templating' }
+  ];
+  public responseRuleOperators: DropdownItems<ResponseRuleOperators> = [
+    { value: 'equals', label: 'equals' },
+    { value: 'regex', label: 'regex' },
+    { value: 'regex_i', label: 'regex (i)' },
+    { value: 'null', label: 'null' },
+    { value: 'empty_array', label: 'empty array' },
+    { value: 'array_includes', label: 'array includes' },
+    { value: 'valid_json_schema', label: 'valid JSON schema' }
+  ];
+  public modifierPlaceholders: Record<ResponseRuleTargets, string> = {
+    body: 'JSONPath or object path (empty for full body)',
+    query: 'Parameter name, JSONPath or object path',
+    header: 'Header name',
+    cookie: 'Cookie name',
+    params: 'Route parameter name',
+    global_var: 'JSONPath or object path (start with var name)',
+    data_bucket: 'JSONPath or object path (start with bucket name or ID)',
+    request_number: '',
+    path: '',
+    method: '',
+    templating: 'Any templating expression (e.g. {{ helper }})'
+  };
+  public valuePlaceholders: Record<ResponseRuleOperators, string> = {
+    equals: 'Value',
+    regex: 'Regex (without /../)',
+    regex_i: 'Regex (without /../i)',
+    null: '',
+    empty_array: '',
+    array_includes: 'Value',
+    valid_json_schema: 'Databucket ID or name'
+  };
+  public disabledOperatorsPerTarget = {
+    request_number: [
+      'null',
+      'empty_array',
+      'array_includes',
+      'valid_json_schema'
+    ],
+    cookie: ['empty_array'],
+    params: ['empty_array', 'array_includes'],
+    path: ['null', 'empty_array', 'array_includes', 'valid_json_schema'],
+    method: ['null', 'empty_array', 'array_includes', 'valid_json_schema'],
+    templating: ['empty_array', 'array_includes']
+  };
+  public rulesOperators: RadioItems = [
+    {
+      value: 'OR',
+      label: 'OR'
+    },
+    {
+      value: 'AND',
+      label: 'AND'
+    }
+  ];
+  public rulesInvert: CheckboxItem = {
+    icon: 'priority_high',
+    tooltip: 'Invert condition'
+  };
+  public deleteRuleRequested$ = new TimedBoolean();
+  public texts = Texts;
+  private searchers = new Map<
+    string,
+    (text$: Observable<string>) => Observable<readonly any[]>
+  >();
+  private listenToChanges = true;
+  public isActiveEnvironmentEditable$ = this.store
+    .selectIsActiveEnvironmentEditable()
+    .pipe(
+      tap((isEditable) => {
+        if (isEditable) {
+          this.form.enable({ emitEvent: false });
+          this.refreshDisabledFields();
+        } else {
+          this.form.disable({ emitEvent: false });
+        }
+      })
+    );
+
+  public get rules() {
+    return this.form.get('rules') as UntypedFormArray;
+  }
+
+  constructor() {
+    this.form = this.formBuilder.group({
+      rulesOperator: ['OR'],
+      rules: this.formBuilder.array([])
+    });
+
+    // subscribe to active route response to reset the form
+    this.routeResponse$ = this.activeRouteResponse$.pipe(
+      filter((activeRouteResponse) => !!activeRouteResponse),
+      this.store.distinctUUIDOrForce(),
+      tap((routeResponse) => {
+        this.replaceRules(routeResponse.rules, false);
+        this.form.get('rulesOperator').setValue(routeResponse.rulesOperator, {
+          emitEvent: false
+        });
+      })
+    );
+
+    // subscribe to changes and send new values to the store
+    this.form.valueChanges
+      .pipe(
+        filter(() => this.listenToChanges),
+        tap((newProperties) => {
+          this.environmentsService.updateActiveRouteResponse(newProperties);
+        }),
+        takeUntilDestroyed()
+      )
+      .subscribe();
+  }
+
+  /**
+   * When the form is fully re-enabled, [attr.disabled] may be reset and
+   * the rules not applied anymore
+   *
+   * (Ideally, we will switch to signal forms where this is not an issue)
+   */
+  private refreshDisabledFields() {
+    this.rules.value.forEach((rule: ResponseRule, index: number) => {
+      const target = rule.target;
+      const operator = rule.operator;
+
+      if (['request_number', 'path', 'method'].includes(target)) {
+        this.rules.at(index).get('modifier').disable({ emitEvent: false });
+      } else {
+        this.rules.at(index).get('modifier').enable({ emitEvent: false });
+      }
+
+      if (['null', 'empty_array'].includes(operator)) {
+        this.rules.at(index).get('value').disable({ emitEvent: false });
+      } else {
+        this.rules.at(index).get('value').enable({ emitEvent: false });
+      }
+    });
+  }
+
+  /**
+   * Add a new rule to the list if possible
+   */
+  public addRule() {
+    this.rules.push(this.formBuilder.group(BuildResponseRule()));
+
+    this.ruleAdded.emit();
+  }
+
+  public reorderRules(reorderAction: ReorderAction) {
+    // store is driving the reordering
+    this.environmentsService.updateActiveRouteResponse(
+      {
+        rules: moveItemToTargetIndex(
+          this.rules.value,
+          reorderAction.reorderActionType,
+          reorderAction.sourceId as number,
+          reorderAction.targetId as number
+        )
+      },
+      // it's a store forced event, triggering a form update here
+      true
+    );
+  }
+
+  /**
+   * Remove a rule from the list
+   */
+  public removeRule(ruleIndex: number) {
+    const confirmValue = this.deleteRuleRequested$.readValue(ruleIndex);
+
+    if (confirmValue.enabled && ruleIndex === confirmValue.payload) {
+      this.rules.removeAt(ruleIndex);
+    }
+  }
+
+  /**
+   * Return contextualized observables for the typeahead directive.
+   * Memoizes the search function based on the list and target to ensure stable references.
+   *
+   * @param list
+   */
+  public buildSearch(list: string[], target: string) {
+    const memoKey = `${list === headerNames ? 'names' : 'values'}-${target}`;
+
+    if (!this.searchers.has(memoKey)) {
+      this.searchers.set(memoKey, (text$: Observable<string>) =>
+        text$.pipe(
+          debounceTime(100),
+          distinctUntilChanged(),
+          map((term) =>
+            term.length < 1 || target !== 'header'
+              ? []
+              : list
+                  .filter((v) => v.toLowerCase().includes(term.toLowerCase()))
+                  .slice(0, 10)
+          )
+        )
+      );
+    }
+
+    return this.searchers.get(memoKey);
+  }
+
+  public headerNamesSearch(target: string) {
+    return this.buildSearch(headerNames, target);
+  }
+
+  public headerValuesSearch(target: string) {
+    return this.buildSearch(headerValues, target);
+  }
+
+  /**
+   * Replace all rules in the FormArray
+   */
+  private replaceRules(newRules: ResponseRule[], listenToChanges = true) {
+    this.listenToChanges = listenToChanges;
+
+    // Preserve the current disabled state of the form
+    const isFormDisabled = this.form.disabled;
+
+    this.rules.clear();
+
+    newRules.forEach((rule) => {
+      this.rules.push(
+        this.formBuilder.group({
+          ...rule
+        } as ResponseRule)
+      );
+    });
+
+    // Reapply the disabled state if necessary
+    if (isFormDisabled) {
+      this.form.disable({ emitEvent: false });
+    }
+
+    this.listenToChanges = true;
+  }
+}

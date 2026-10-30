@@ -1,0 +1,62 @@
+import { Observable, Subject } from 'rxjs';
+import { SvgComponent } from 'src/renderer/app/components/svg/svg.component';
+
+export type DragState = {
+  // id of the dragged element (UUID or index)
+  elementId: number | string;
+  // arbitrary name of the dragged element's container (avoid drag and drop between different containers)
+  dragContainer: string;
+  // Id of the dragged element's parent or 'root'
+  parentId: string | 'root';
+  // Is the dragged element a container (can contain other elements like a folder)
+  isContainer: boolean;
+  nativeElement: HTMLElement;
+};
+
+export type ConfirmModalPayload = {
+  title: string;
+  text: string;
+  confirmButtonText?: string;
+  cancelButtonText?: string;
+  cancelable?: boolean;
+  sub?: string;
+  subIcon?: string;
+  subIconClass?: string;
+  // display an optional list of strings in the confirm modal
+  list$?: Observable<string[]>;
+  confirmed$: Subject<boolean>;
+};
+
+export type EditorModalPayload = {
+  title: string;
+  subtitle?: string;
+  text: string;
+};
+
+export type ManageInstancesModalPayload = {
+  environmentUuid?: string;
+  refresh: boolean;
+};
+
+export type OpenApiImportMode = 'import' | 'reimport';
+
+export type OpenApiImportModalPayload = {
+  cloud: boolean;
+  mode: OpenApiImportMode;
+  environmentUuid?: string;
+};
+
+export type ToolbarButtonConfig = {
+  id: string;
+  action: string;
+  icon: SvgComponent['icon'];
+  ariaLabel: string;
+  tooltip: string;
+  disabled?: boolean;
+  disabled$?: Observable<boolean>;
+  twoSteps?: boolean;
+  confirmIcon?: SvgComponent['icon'];
+  confirmAriaLabel?: string;
+  confirmTooltip?: string;
+  danger?: boolean;
+};

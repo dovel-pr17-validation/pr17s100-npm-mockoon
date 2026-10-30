@@ -1,0 +1,19 @@
+import { Service } from '@angular/core';
+import { InFlightRequest, Transaction } from '@mockoon/commons';
+import { BehaviorSubject, Subject } from 'rxjs';
+import { FocusableInputs } from 'src/renderer/app/enums/ui.enum';
+import { EnvironmentLogOrigin } from 'src/renderer/app/models/environment-logs.model';
+
+@Service()
+export class EventsService {
+  public focusInput = new Subject<FocusableInputs>();
+  public updateAvailable$ = new BehaviorSubject<string | null>(null);
+  // environment UUID -> boolean
+  public logsRecording$ = new BehaviorSubject<Record<string, boolean>>({});
+  public serverTransaction$ = new Subject<{
+    environmentUUID: string;
+    transaction?: Transaction;
+    inflightRequest?: InFlightRequest;
+    origin: EnvironmentLogOrigin;
+  }>();
+}

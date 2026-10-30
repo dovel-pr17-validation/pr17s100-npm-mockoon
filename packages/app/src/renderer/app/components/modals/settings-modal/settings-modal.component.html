@@ -1,0 +1,377 @@
+<div class="modal-header">
+  <h4 class="modal-title">Settings</h4>
+</div>
+
+<div class="modal-body">
+  <div>
+    <app-title-separator
+      heading="User interface"
+      [isFirst]="true"
+      icon="web_asset"
+    />
+
+    <div class="ps-4">
+      <div class="mb-3">
+        <div class="form-check">
+          <input
+            type="checkbox"
+            class="form-check-input"
+            id="settings-truncate-route-name"
+            [formField]="settingsForm.truncateRouteName"
+          />
+          <label class="form-check-label" for="settings-truncate-route-name"
+            >Truncate long paths in lists (environments, routes, logs,
+            etc.)</label
+          >
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section
+    class="self-hosted-settings"
+    [class.self-hosted-settings-highlighted]="highlightSelfHosted()"
+  >
+    <app-title-separator
+      heading="Self-hosted Mockoon Pro instance"
+      icon="cloud"
+    />
+
+    <div class="ps-4">
+      <div class="mb-3">
+        <div class="input-group">
+          <label for="settings-api-url" class="col-form-label pe-2">
+            Self-hosted API URL
+          </label>
+          <input
+            #apiUrlInput
+            type="text"
+            class="form-control col-1"
+            id="settings-api-url"
+            placeholder="https://api.mockoon.com/"
+            [formField]="settingsForm.apiUrl"
+          />
+          <div class="input-group-text">
+            <app-svg icon="info" [ngbTooltip]="apiUrlTooltip" />
+            <ng-template #apiUrlTooltip>
+              <div>
+                Override the default API URL to use a self-hosted Mockoon Pro
+                instance. The URL must contain the protocol (http or https),
+                port, if applicable, and no trailing slash. Example:
+                https://mockoon.company.com or http://localhost:6000
+              </div>
+            </ng-template>
+          </div>
+          @if (
+            settingsForm.apiUrl().getError('invalidApiUrl') ||
+            settingsForm.apiUrl().pending() ||
+            (settingsForm.apiUrl().valid() &&
+              settingsForm.apiUrl().value() !== '')
+          ) {
+            <div class="input-group-text">
+              <small>
+                @if (settingsForm.apiUrl().getError('invalidApiUrl')) {
+                  <app-svg
+                    icon="warning"
+                    size="12"
+                    class="text-warning"
+                    [ngbTooltip]="
+                      settingsForm.apiUrl().getError('invalidApiUrl')?.message
+                    "
+                  />
+                } @else if (settingsForm.apiUrl().pending()) {
+                  <app-spinner size="12" />
+                } @else if (
+                  settingsForm.apiUrl().valid() &&
+                  settingsForm.apiUrl().value() !== ''
+                ) {
+                  <app-svg
+                    icon="check"
+                    size="12"
+                    class="text-success"
+                    ngbTooltip="Self-hosted API URL is valid"
+                  />
+                }
+              </small>
+            </div>
+          }
+        </div>
+        <small class="text-muted">
+          Learn more about
+          <a [href]="proPlansURL" target="_blank">Mockoon Pro</a>
+        </small>
+      </div>
+    </div>
+  </section>
+
+  @if (!isWeb) {
+    <app-title-separator heading="Environment variables" icon="list" />
+
+    <div class="ps-4">
+      <div class="mb-3">
+        <div class="input-group">
+          <label for="settings-env-vars-prefix" class="col-form-label pe-2">
+            Environment variables prefix
+          </label>
+          <input
+            type="text"
+            class="form-control col-1"
+            id="settings-env-vars-prefix"
+            [formField]="settingsForm.envVarsPrefix"
+          />
+          <div class="input-group-text">
+            <app-svg icon="info" [ngbTooltip]="envVarsPrefixTooltip" />
+            <ng-template #envVarsPrefixTooltip>
+              <div>
+                Restrict access to environment variables starting with the
+                specified prefix. Leave empty to disable prefix filtering.
+              </div>
+              <div class="mt-2">
+                ⚠️ Requires a server restart to take effect
+              </div>
+              <div class="mt-2">
+                ⚠️ Updating the environment variables requires an application
+                restart
+              </div>
+            </ng-template>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <app-title-separator heading="Environment logs" icon="history" />
+
+  <div class="ps-4">
+    @if (!isWeb) {
+      <div class="mb-3">
+        <div class="input-group align-items-center">
+          <div class="form-check mb-0">
+            <input
+              type="checkbox"
+              class="form-check-input"
+              id="settings-log-transactions"
+              [formField]="settingsForm.logTransactions"
+            />
+            <label class="form-check-label" for="settings-log-transactions">
+              Log the full transactions
+            </label>
+          </div>
+          <div class="input-group-text">
+            <app-svg icon="info" [ngbTooltip]="logTransactionsTooltip" />
+            <ng-template #logTransactionsTooltip>
+              <div>
+                Logs the full transaction (for requests, responses and
+                callbacks) in the application log files. Greatly increases the
+                volume of logs.
+              </div>
+              <div class="mt-2">
+                ⚠️ Requires a server restart to take effect
+              </div>
+            </ng-template>
+          </div>
+        </div>
+      </div>
+    }
+
+    <div class="mb-3">
+      <div class="input-group">
+        <label for="settings-log-max-count" class="col-form-label pe-2">
+          Maximum log entries displayed in the "Logs" tab (per environment)
+        </label>
+        <input
+          type="number"
+          class="form-control col-1"
+          id="settings-log-max-count"
+          [appInputNumber]="{
+            min: 1,
+            max: maxLogsPerEnvironmentLimit,
+            canBeEmpty: false
+          }"
+          [formField]="settingsForm.maxLogsPerEnvironment"
+        />
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <div class="form-check">
+        <input
+          type="checkbox"
+          class="form-check-input"
+          id="settings-log-iso-timestamp"
+          [formField]="settingsForm.displayLogsIsoTimestamp"
+        />
+        <label class="form-check-label" for="settings-log-iso-timestamp">
+          Use ISO timestamp format in logs instead of human-readable format
+          (e.g. "1 minute ago")
+        </label>
+      </div>
+    </div>
+  </div>
+
+  @if (!isWeb) {
+    <app-title-separator
+      heading="Faker.js"
+      subheading="Templating system supports Faker.js"
+      icon="code"
+    />
+
+    <div class="ps-4">
+      <div class="mb-3">
+        <div class="input-group">
+          <label class="col-form-label pe-2"> Locale </label>
+          <app-select
+            class="col-3"
+            [formField]="settingsForm.fakerLocale"
+            [enableCustomInput]="false"
+            [items]="fakerLocales"
+            dropdownId="settings-faker-locale"
+          />
+          <div class="input-group-text">
+            <app-svg icon="info" [ngbTooltip]="fakerLocaleTooltip" />
+            <ng-template #fakerLocaleTooltip>
+              <div>
+                Set Faker.js's primary locale. Faker.js will fallback to English
+                for helpers not covered by this locale
+              </div>
+              <div class="mt-2">
+                ⚠️ Requires a server restart to take effect
+              </div>
+            </ng-template>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <div class="input-group">
+          <label for="settings-faker-seed" class="col-form-label pe-2">
+            Seed
+          </label>
+          <!-- input number is important for the seed -->
+          <input
+            type="number"
+            class="form-control col-4"
+            id="settings-faker-seed"
+            placeholder="Number or empty for no seed"
+            [appInputNumber]="{ min: 0, max: Infinity, canBeEmpty: true }"
+            [formField]="settingsForm.fakerSeed"
+          />
+          <div class="input-group-text">
+            <app-svg icon="info" [ngbTooltip]="fakerSeedTooltip" />
+            <ng-template #fakerSeedTooltip>
+              <div>
+                By setting a seed, Faker.js will always generate the same data
+                sequence
+              </div>
+              <div class="mt-2">
+                ⚠️ Requires a server restart to take effect
+              </div>
+            </ng-template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <app-title-separator heading="Environments options" icon="misc" />
+
+    <div class="ps-4">
+      <div class="mb-3">
+        <div class="input-group">
+          <div class="form-check">
+            <input
+              type="checkbox"
+              class="form-check-input"
+              id="settings-start-environments-on-load"
+              [formField]="settingsForm.startEnvironmentsOnLoad"
+            />
+            <label
+              class="form-check-label"
+              for="settings-start-environments-on-load"
+            >
+              Start all environments on application startup
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ps-4">
+      <div class="mb-3">
+        <div class="input-group align-items-center">
+          <div class="form-check mb-0">
+            <input
+              type="checkbox"
+              class="form-check-input"
+              id="settings-enable-random-latency"
+              [formField]="settingsForm.enableRandomLatency"
+            />
+            <label
+              class="form-check-label"
+              for="settings-enable-random-latency"
+            >
+              Randomize latencies
+            </label>
+          </div>
+          <div class="input-group-text">
+            <app-svg icon="info" [ngbTooltip]="latencyTooltip" />
+            <ng-template #latencyTooltip>
+              <div>
+                Randomize global and responses latencies between 0 and the
+                specified value
+              </div>
+              <div class="mt-2">
+                ⚠️ Requires application restart to take effect
+              </div>
+            </ng-template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <app-title-separator heading="Storage" icon="save" />
+
+    <div class="ps-4">
+      <div class="mb-3">
+        <div class="input-group file-watcher-input-group">
+          <label class="col-form-label pe-2"> Environment files watcher </label>
+
+          <app-select
+            class="col-2"
+            [formField]="settingsForm.fileWatcherEnabled"
+            [enableCustomInput]="false"
+            [items]="fileWatcherOptions"
+            dropdownId="settings-storage-file-watcher"
+          />
+          <div class="input-group-text">
+            <app-svg
+              icon="info"
+              ngbTooltip="Mockoon will watch environment files for external changes and prompt (or not) for reload"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ps-4">
+      <div class="mb-3">
+        <div class="form-check">
+          <input
+            type="checkbox"
+            class="form-check-input"
+            id="settings-storage-pretty-print"
+            [formField]="settingsForm.storagePrettyPrint"
+          />
+          <label class="form-check-label" for="settings-storage-pretty-print">
+            Pretty print JSON storage files (settings and environments)</label
+          >
+        </div>
+      </div>
+    </div>
+  }
+</div>
+
+<div class="modal-footer">
+  <button type="button" class="btn btn-secondary modal-close" (click)="close()">
+    Close
+  </button>
+</div>

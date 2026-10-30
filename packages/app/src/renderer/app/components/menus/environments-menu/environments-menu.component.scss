@@ -1,0 +1,18 @@
+@import 'src/renderer/styles/bootstrap-variables.scss';
+
+.environments-menu {
+  background: $gray-900;
+  border-right: 1px solid lighten($gray-900, 2%);
+  min-width: 100px;
+  // initial width
+  width: 150px;
+
+  position: relative; // we need this for the resize-column
+}
+
+.cloud-offline-banner {
+  color: $orange-200;
+  background-color: rgba($orange, 0.12);
+  border-top: 1px solid rgba($orange, 0.35);
+  border-bottom: 1px solid rgba($orange, 0.35);
+}

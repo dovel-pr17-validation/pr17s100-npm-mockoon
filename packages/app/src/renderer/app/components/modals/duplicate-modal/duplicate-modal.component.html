@@ -1,0 +1,58 @@
+@let environments = environments$ | async;
+@let entityDuplicationState = entityDuplicationState$ | async;
+
+<div class="modal-header">
+  <h3 class="modal-title">
+    Choose target environment
+    <br />
+    <small class="text-muted h6">
+      Copy {{ entityDuplicationState.subjectUuids.length }}
+      @switch (entityDuplicationState.subject) {
+        @case ('route') {
+          {{
+            entityDuplicationState.subjectUuids.length > 1 ? 'routes' : 'route'
+          }}
+        }
+        @case ('databucket') {
+          {{
+            entityDuplicationState.subjectUuids.length > 1
+              ? 'data buckets'
+              : 'data bucket'
+          }}
+        }
+        @case ('callback') {
+          {{
+            entityDuplicationState.subjectUuids.length > 1
+              ? 'callbacks'
+              : 'callback'
+          }}
+        }
+      }
+      to:
+    </small>
+  </h3>
+</div>
+
+<div class="modal-body p-0">
+  <div class="list-group list-group-flush">
+    @for (environment of environments; track environment.uuid) {
+      <button
+        class="list-group-item list-group-item-action"
+        type="button"
+        (click)="chooseTargetEnvironment(environment, entityDuplicationState)"
+      >
+        <div class="text-truncate">{{ environment.name }}</div>
+        <div class="nav-link-subtitle text-truncate">
+          {{ environment.hostname || 'localhost' }}:{{ environment.port }}/{{
+            environment.endpointPrefix
+          }}
+        </div>
+      </button>
+    }
+  </div>
+</div>
+<div class="modal-footer">
+  <button type="button" class="btn btn-secondary modal-close" (click)="close()">
+    Cancel
+  </button>
+</div>
